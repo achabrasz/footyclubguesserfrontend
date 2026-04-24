@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import './App.css'
 
-//const API_URL = 'https://footytictactoebackend.onrender.com'
-const API_URL = 'http://localhost:5005'
+const API_URL = 'https://footytictactoebackend.onrender.com'
+//const API_URL = 'http://localhost:5005'
 
 interface Player {
   id: string
