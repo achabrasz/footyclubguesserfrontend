@@ -41,7 +41,15 @@ function App() {
 
   // Fetch available clubs on mount
   useEffect(() => {
-    const fetchClubs = async () => {
+    const initializeApp = async () => {
+      try {
+        // Call the /start endpoint
+        await fetch(`${API_URL}/start`)
+      } catch (err) {
+        console.error('Failed to initialize app:', err)
+      }
+
+      // Fetch available clubs
       try {
         const res = await fetch(`${API_URL}/clubs`)
         const data = await res.json()
@@ -50,7 +58,8 @@ function App() {
         console.error('Failed to fetch clubs:', err)
       }
     }
-    fetchClubs()
+
+    initializeApp()
   }, [])
 
   const createRoom = () => {

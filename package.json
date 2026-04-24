@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start": "npm run build && serve -l 10000 dist"
+    "start": "serve -l 10000 dist"
   },
   "dependencies": {
     "react": "^19.2.5",
