@@ -8,5 +8,10 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 10000,
     strictPort: false,
+    allowedHosts: [
+      'footyclubguesserfrontend.onrender.com',
+      'localhost',
+      '127.0.0.1',
+    ],
   },
 })
