@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import './App.css'
 
-const API_URL = 'https://footytictactoebackend.onrender.com'
+//const API_URL = 'https://footytictactoebackend.onrender.com'
+const API_URL = 'http://localhost:5005'
 
 interface Player {
   id: string
@@ -249,17 +250,18 @@ function App() {
         <div className="player-section">
           <h2>Your Name: {currentRoom?.players.find((p) => p.id === currentPlayerId)?.name}</h2>
           <p>Pick a club:</p>
-          <div className="clubs-grid">
+          <select
+            value={selectedClub}
+            onChange={(e) => selectClub(e.target.value)}
+            className="club-select"
+          >
+            <option value="">-- Select a club --</option>
             {availableClubs.map((club) => (
-              <button
-                key={club}
-                className={`club-btn ${selectedClub === club ? 'selected' : ''}`}
-                onClick={() => selectClub(club)}
-              >
+              <option key={club} value={club}>
                 {club}
-              </button>
+              </option>
             ))}
-          </div>
+          </select>
         </div>
 
         <div className="players-list">
