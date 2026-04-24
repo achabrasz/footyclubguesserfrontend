@@ -5,24 +5,30 @@ const API_URL = 'https://footytictactoebackend.onrender.com'
 //const API_URL = 'http://localhost:5005'
 
 interface Player {
-  id: string
+  playerId: string
   name: string
   club: string | null
   score: number
+  joinedAt?: string
 }
 
 interface Room {
-  id: string
-  players: Player[]
+  roomCode: string
+  creatorId: string
+  creatorName: string
   gameStarted: boolean
+  createdAt: string
+  currentTurnPlayerId: string | null
+  players: Player[]
 }
 
 interface VerifyResult {
-  player: string
-  club1: string
-  club2: string
-  played: boolean
-  clubs_found: string[]
+  verified: boolean
+  playerFound: boolean
+  clubsFound: string[]
+  pointsEarned: number
+  updatedScore: number
+  allPlayersScores: { [key: string]: number }
 }
 
 function App() {
@@ -62,31 +68,44 @@ function App() {
     initializeApp()
   }, [])
 
-  const createRoom = () => {
+  const createRoom = async () => {
     if (!playerName.trim()) {
       setError('Please enter your name')
       return
     }
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase()
-    const newPlayer: Player = {
-      id: Math.random().toString(),
-      name: playerName,
-      club: null,
-      score: 0,
-    }
-    const newRoom: Room = {
-      id: code,
-      players: [newPlayer],
-      gameStarted: false,
-    }
-    setCurrentRoom(newRoom)
-    setCurrentPlayerId(newPlayer.id)
-    setRoomCode(code)
-    setView('room')
+
+    setLoading(true)
     setError('')
+    try {
+      const res = await fetch(`${API_URL}/rooms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorName: playerName }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to create room')
+        return
+      }
+
+      setCurrentPlayerId(data.playerId)
+      setRoomCode(data.roomCode)
+
+      // Fetch the full room data
+      const roomRes = await fetch(`${API_URL}/rooms/${data.roomCode}`)
+      const roomData = await roomRes.json()
+      setCurrentRoom(roomData)
+      setView('room')
+    } catch (err) {
+      console.error('Failed to create room:', err)
+      setError('Failed to create room')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const joinRoom = () => {
+  const joinRoom = async () => {
     if (!playerName.trim()) {
       setError('Please enter your name')
       return
@@ -95,56 +114,106 @@ function App() {
       setError('Please enter a room code')
       return
     }
-    if (!currentRoom) {
-      setError('Room not found. Make sure the code is correct.')
-      return
-    }
-    // Check if player name already exists
-    if (currentRoom.players.some((p) => p.name.toLowerCase() === playerName.toLowerCase())) {
-      setError('This name is already taken in this room')
-      return
-    }
-    const newPlayer: Player = {
-      id: Math.random().toString(),
-      name: playerName,
-      club: null,
-      score: 0,
-    }
-    setCurrentRoom({
-      ...currentRoom,
-      players: [...currentRoom.players, newPlayer],
-    })
-    setCurrentPlayerId(newPlayer.id)
-    setView('room')
+
+    setLoading(true)
     setError('')
-  }
+    try {
+      const res = await fetch(`${API_URL}/rooms/${roomCode}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerName }),
+      })
+      const data = await res.json()
 
-  const selectClub = (club: string) => {
-    if (!currentRoom) return
-    const updatedRoom = {
-      ...currentRoom,
-      players: currentRoom.players.map((p) =>
-        p.id === currentPlayerId ? { ...p, club } : p
-      ),
+      if (!res.ok) {
+        setError(data.error || 'Failed to join room')
+        return
+      }
+
+      setCurrentPlayerId(data.playerId)
+
+      // Fetch the full room data
+      const roomRes = await fetch(`${API_URL}/rooms/${roomCode}`)
+      const roomData = await roomRes.json()
+      setCurrentRoom(roomData)
+      setView('room')
+    } catch (err) {
+      console.error('Failed to join room:', err)
+      setError('Failed to join room')
+    } finally {
+      setLoading(false)
     }
-    setCurrentRoom(updatedRoom)
-    setSelectedClub(club)
   }
 
-  const startGame = () => {
+  const selectClub = async (club: string) => {
+    if (!currentRoom) return
+
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_URL}/rooms/${currentRoom.roomCode}/select-club`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: currentPlayerId, club }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to select club')
+        return
+      }
+
+      setSelectedClub(club)
+
+      // Update room with new players data
+      setCurrentRoom({
+        ...currentRoom,
+        players: data.updatedPlayers,
+      })
+    } catch (err) {
+      console.error('Failed to select club:', err)
+      setError('Failed to select club')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const startGame = async () => {
     if (currentRoom?.players.some((p) => !p.club)) {
       setError('All players must select a club before starting')
       return
     }
-    if (currentRoom?.players.length && currentRoom.players.length < 2) {
+    if (currentRoom && currentRoom.players.length < 2) {
       setError('At least 2 players are required to start the game')
       return
     }
-    if (currentRoom) {
-      setCurrentRoom({ ...currentRoom, gameStarted: true })
-      setCurrentRoundPlayer(currentRoom.players[0].id)
+
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_URL}/rooms/${currentRoom?.roomCode}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: currentPlayerId }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to start game')
+        return
+      }
+
+      // Fetch updated room
+      const roomRes = await fetch(`${API_URL}/rooms/${currentRoom?.roomCode}`)
+      const roomData = await roomRes.json()
+      setCurrentRoom(roomData)
+      setCurrentRoundPlayer(data.firstPlayerId)
       setView('game')
-      setError('')
+    } catch (err) {
+      console.error('Failed to start game:', err)
+      setError('Failed to start game')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -154,39 +223,37 @@ function App() {
       return
     }
 
-    const activePlayer = currentRoom?.players.find((p) => p.id === currentRoundPlayer)
+    const activePlayer = currentRoom?.players.find((p) => p.playerId === currentRoundPlayer)
     if (!activePlayer?.club) return
 
     setLoading(true)
     setError('')
     try {
-      // Get another random club to verify against
-      const otherClubs = availableClubs.filter((c) => c !== activePlayer.club)
-      const randomClub = otherClubs[Math.floor(Math.random() * otherClubs.length)]
-
-      const res = await fetch(
-        `${API_URL}/verify?player=${encodeURIComponent(verifyPlayerName)}&club1=${encodeURIComponent(activePlayer.club as string)}&club2=${encodeURIComponent(randomClub)}`
-      )
+      const res = await fetch(`${API_URL}/rooms/${currentRoom?.roomCode}/verify-guess`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playerId: currentPlayerId,
+          playerName: verifyPlayerName,
+          clubName: activePlayer.club,
+        }),
+      })
       const data = await res.json()
       setVerifyResult(data)
 
-      if (data.played) {
-        // Award points for each club matched
-        const matchedClubs = data.clubs_found.filter(
-          (club: string) =>
-            club.toLowerCase().includes((activePlayer.club as string).toLowerCase()) ||
-            club.toLowerCase().includes(randomClub.toLowerCase())
-        ).length
+      if (!res.ok) {
+        setError(data.error || 'Failed to verify player')
+        return
+      }
 
-        if (currentRoom) {
-          const updatedRoom = {
-            ...currentRoom,
-            players: currentRoom.players.map((p) =>
-              p.id === currentRoundPlayer ? { ...p, score: p.score + matchedClubs } : p
-            ),
-          }
-          setCurrentRoom(updatedRoom)
-        }
+      // Update room scores
+      if (currentRoom) {
+        setCurrentRoom({
+          ...currentRoom,
+          players: currentRoom.players.map((p) =>
+            p.playerId === currentPlayerId ? { ...p, score: data.updatedScore } : p
+          ),
+        })
       }
     } catch (err) {
       console.error('Verification failed:', err)
@@ -196,13 +263,42 @@ function App() {
     }
   }
 
-  const nextRound = () => {
+  const nextRound = async () => {
     if (!currentRoom) return
-    const currentIndex = currentRoom.players.findIndex((p) => p.id === currentRoundPlayer)
-    const nextIndex = (currentIndex + 1) % currentRoom.players.length
-    setCurrentRoundPlayer(currentRoom.players[nextIndex].id)
-    setVerifyPlayerName('')
-    setVerifyResult(null)
+
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_URL}/rooms/${currentRoom.roomCode}/next-turn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPlayerId: currentRoundPlayer }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to advance turn')
+        return
+      }
+
+      setCurrentRoundPlayer(data.nextPlayerId)
+      setVerifyPlayerName('')
+      setVerifyResult(null)
+
+      // Update scores in room
+      setCurrentRoom({
+        ...currentRoom,
+        players: currentRoom.players.map((p) => ({
+          ...p,
+          score: data.allScores[p.playerId] || p.score,
+        })),
+      })
+    } catch (err) {
+      console.error('Failed to advance turn:', err)
+      setError('Failed to advance turn')
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (view === 'home') {
@@ -221,9 +317,10 @@ function App() {
             onChange={(e) => setPlayerName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && createRoom()}
             className="input"
+            disabled={loading}
           />
-          <button onClick={createRoom} className="btn btn-primary">
-            Create Room
+          <button onClick={createRoom} className="btn btn-primary" disabled={loading}>
+            {loading ? 'Creating...' : 'Create Room'}
           </button>
         </div>
 
@@ -237,9 +334,10 @@ function App() {
             onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === 'Enter' && joinRoom()}
             className="input"
+            disabled={loading}
           />
-          <button onClick={joinRoom} className="btn btn-secondary">
-            Join Room
+          <button onClick={joinRoom} className="btn btn-secondary" disabled={loading}>
+            {loading ? 'Joining...' : 'Join Room'}
           </button>
         </div>
 
@@ -257,12 +355,13 @@ function App() {
         </div>
 
         <div className="player-section">
-          <h2>Your Name: {currentRoom?.players.find((p) => p.id === currentPlayerId)?.name}</h2>
+          <h2>Your Name: {currentRoom?.players.find((p) => p.playerId === currentPlayerId)?.name}</h2>
           <p>Pick a club:</p>
           <select
             value={selectedClub}
             onChange={(e) => selectClub(e.target.value)}
             className="club-select"
+            disabled={loading}
           >
             <option value="">-- Select a club --</option>
             {availableClubs.map((club) => (
@@ -276,7 +375,7 @@ function App() {
         <div className="players-list">
           <h3>Players in Room ({currentRoom?.players.length}):</h3>
           {currentRoom?.players.map((p) => (
-            <div key={p.id} className="player-item">
+            <div key={p.playerId} className="player-item">
               <span className="player-name">{p.name}</span>
               <span className={`club-badge ${p.club ? 'selected' : 'empty'}`}>
                 {p.club || 'No club selected'}
@@ -288,9 +387,9 @@ function App() {
         <button
           onClick={startGame}
           className="btn btn-primary start-btn"
-          disabled={!currentRoom?.players.every((p) => p.club) || (currentRoom?.players.length || 0) < 2}
+          disabled={!currentRoom?.players.every((p) => p.club) || (currentRoom?.players.length || 0) < 2 || loading}
         >
-          Start Game
+          {loading ? 'Starting...' : 'Start Game'}
         </button>
 
         {error && <div className="error-message">{error}</div>}
@@ -299,8 +398,8 @@ function App() {
   }
 
   if (view === 'game') {
-    const activePlayer = currentRoom?.players.find((p) => p.id === currentRoundPlayer)
-    const isMyTurn = activePlayer?.id === currentPlayerId
+    const activePlayer = currentRoom?.players.find((p) => p.playerId === currentRoundPlayer)
+    const isMyTurn = activePlayer?.playerId === currentPlayerId
     const sortedPlayers = currentRoom?.players.toSorted((a, b) => b.score - a.score)
 
     return (
@@ -309,7 +408,7 @@ function App() {
           <h1>🎮 Game in Progress</h1>
           <div className="room-info">
             <span>Room: {roomCode}</span>
-            <span>Your name: {currentRoom?.players.find((p) => p.id === currentPlayerId)?.name}</span>
+            <span>Your name: {currentRoom?.players.find((p) => p.playerId === currentPlayerId)?.name}</span>
           </div>
         </div>
 
@@ -317,7 +416,7 @@ function App() {
           <h2>Scores</h2>
           <div className="scores-list">
             {sortedPlayers?.map((p) => (
-              <div key={p.id} className={`score-item ${p.id === currentRoundPlayer ? 'active' : ''}`}>
+              <div key={p.playerId} className={`score-item ${p.playerId === currentRoundPlayer ? 'active' : ''}`}>
                 <span className="player-name">{p.name}</span>
                 <span className="club-info">{p.club}</span>
                 <span className="score">{p.score} pts</span>
@@ -353,23 +452,25 @@ function App() {
             </div>
 
             {verifyResult && (
-              <div className={`result ${verifyResult.played ? 'success' : 'failure'}`}>
-                <h3>{verifyResult.player}</h3>
+              <div className={`result ${verifyResult.verified ? 'success' : 'failure'}`}>
+                <h3>{verifyPlayerName}</h3>
                 <p>
-                  <strong>Played for {activePlayer?.club}:</strong> {verifyResult.played ? '✅ YES' : '❌ NO'}
+                  <strong>Played for {activePlayer?.club}:</strong> {verifyResult.verified ? '✅ YES' : '❌ NO'}
                 </p>
                 <p className="clubs-found">
-                  <strong>Clubs found:</strong> {verifyResult.clubs_found.join(', ') || 'None'}
+                  <strong>Clubs found:</strong> {verifyResult.clubsFound.join(', ') || 'None'}
                 </p>
-                {verifyResult.played && <p className="points-earned">+1 Point!</p>}
+                {verifyResult.verified && (
+                  <p className="points-earned">+{verifyResult.pointsEarned} Points!</p>
+                )}
               </div>
             )}
 
             {error && <div className="error-message">{error}</div>}
 
             {verifyResult && (
-              <button onClick={nextRound} className="btn btn-secondary">
-                Next Player's Turn
+              <button onClick={nextRound} className="btn btn-secondary" disabled={loading}>
+                {loading ? 'Loading...' : "Next Player's Turn"}
               </button>
             )}
           </div>
