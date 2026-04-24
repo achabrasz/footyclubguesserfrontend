@@ -156,7 +156,7 @@ function App() {
       const randomClub = otherClubs[Math.floor(Math.random() * otherClubs.length)]
 
       const res = await fetch(
-        `${API_URL}/verify?player=${encodeURIComponent(verifyPlayerName)}&club1=${encodeURIComponent(activePlayer.club)}&club2=${encodeURIComponent(randomClub)}`
+        `${API_URL}/verify?player=${encodeURIComponent(verifyPlayerName)}&club1=${encodeURIComponent(activePlayer.club as string)}&club2=${encodeURIComponent(randomClub)}`
       )
       const data = await res.json()
       setVerifyResult(data)
@@ -165,7 +165,7 @@ function App() {
         // Award points for each club matched
         const matchedClubs = data.clubs_found.filter(
           (club: string) =>
-            club.toLowerCase().includes(activePlayer.club.toLowerCase()) ||
+            club.toLowerCase().includes((activePlayer.club as string).toLowerCase()) ||
             club.toLowerCase().includes(randomClub.toLowerCase())
         ).length
 
@@ -279,7 +279,7 @@ function App() {
         <button
           onClick={startGame}
           className="btn btn-primary start-btn"
-          disabled={!currentRoom?.players.every((p) => p.club) || currentRoom?.players.length && currentRoom.players.length < 2}
+          disabled={!currentRoom?.players.every((p) => p.club) || (currentRoom?.players.length || 0) < 2}
         >
           Start Game
         </button>
