@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './App.css'
 
 const API_URL = 'https://footytictactoebackend.onrender.com'
+const WS_URL = 'wss://footytictactoebackend.onrender.com'
 //const API_URL = 'http://localhost:5005'
+//const WS_URL = 'ws://localhost:5005'
 
 interface Player {
   playerId: string
@@ -20,6 +22,7 @@ interface Room {
   createdAt: string
   currentTurnPlayerId: string | null
   players: Player[]
+  hideClubs?: boolean
 }
 
 interface VerifyResult {
@@ -44,8 +47,10 @@ function App() {
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [hideClubs, setHideClubs] = useState(false)
+  const wsRef = useRef<WebSocket | null>(null)
 
-  // Fetch available clubs on mount
+  // Load session from localStorage on mount
   useEffect(() => {
     const initializeApp = async () => {
       try {
@@ -63,10 +68,96 @@ function App() {
       } catch (err) {
         console.error('Failed to fetch clubs:', err)
       }
+
+      // Restore session from localStorage
+      const sessionData = localStorage.getItem('gameSession')
+      if (sessionData) {
+        try {
+          const session = JSON.parse(sessionData)
+          setCurrentPlayerId(session.currentPlayerId)
+          setRoomCode(session.roomCode)
+          setPlayerName(session.playerName)
+          setSelectedClub(session.selectedClub)
+          setView(session.view)
+
+          // Fetch current room data
+          const roomRes = await fetch(`${API_URL}/rooms/${session.roomCode}`)
+          const roomData = await roomRes.json()
+          setCurrentRoom(roomData)
+
+          if (session.view === 'game') {
+            setCurrentRoundPlayer(session.currentRoundPlayer)
+          }
+
+          // Connect to WebSocket
+          connectWebSocket(session.roomCode)
+        } catch (err) {
+          console.error('Failed to restore session:', err)
+          localStorage.removeItem('gameSession')
+        }
+      }
     }
 
     initializeApp()
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
   }, [])
+
+  // Save session to localStorage whenever it changes
+  useEffect(() => {
+    if (currentPlayerId && roomCode) {
+      const sessionData = {
+        currentPlayerId,
+        roomCode,
+        playerName,
+        selectedClub,
+        view,
+        currentRoundPlayer,
+      }
+      localStorage.setItem('gameSession', JSON.stringify(sessionData))
+    }
+  }, [currentPlayerId, roomCode, playerName, selectedClub, view, currentRoundPlayer])
+
+  const connectWebSocket = (code: string) => {
+    try {
+      const ws = new WebSocket(`${WS_URL}/rooms/${code}/subscribe`)
+
+      ws.onopen = () => {
+        console.log('WebSocket connected')
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'room-update') {
+            setCurrentRoom(data.room)
+          } else if (data.type === 'turn-changed') {
+            setCurrentRoundPlayer(data.nextPlayerId)
+          }
+        } catch (err) {
+          console.error('Failed to parse WebSocket message:', err)
+        }
+      }
+
+      ws.onerror = (err) => {
+        console.error('WebSocket error:', err)
+      }
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected')
+        // Attempt to reconnect after 3 seconds
+        setTimeout(() => connectWebSocket(code), 3000)
+      }
+
+      wsRef.current = ws
+    } catch (err) {
+      console.error('Failed to connect WebSocket:', err)
+    }
+  }
 
   const createRoom = async () => {
     if (!playerName.trim()) {
@@ -80,7 +171,7 @@ function App() {
       const res = await fetch(`${API_URL}/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ creatorName: playerName }),
+        body: JSON.stringify({ creatorName: playerName, hideClubs }),
       })
       const data = await res.json()
 
@@ -97,6 +188,9 @@ function App() {
       const roomData = await roomRes.json()
       setCurrentRoom(roomData)
       setView('room')
+
+      // Connect to WebSocket
+      connectWebSocket(data.roomCode)
     } catch (err) {
       console.error('Failed to create room:', err)
       setError('Failed to create room')
@@ -137,6 +231,9 @@ function App() {
       const roomData = await roomRes.json()
       setCurrentRoom(roomData)
       setView('room')
+
+      // Connect to WebSocket
+      connectWebSocket(roomCode)
     } catch (err) {
       console.error('Failed to join room:', err)
       setError('Failed to join room')
@@ -179,7 +276,7 @@ function App() {
   }
 
   const startGame = async () => {
-    if (currentRoom?.players.some((p) => !p.club)) {
+    if (!currentRoom?.players.every((p) => p.club)) {
       setError('All players must select a club before starting')
       return
     }
@@ -301,6 +398,23 @@ function App() {
     }
   }
 
+  const goBack = () => {
+    if (view === 'game') {
+      setView('room')
+    } else if (view === 'room') {
+      setView('home')
+      localStorage.removeItem('gameSession')
+      setCurrentPlayerId('')
+      setRoomCode('')
+      setSelectedClub('')
+      setPlayerName('')
+      setCurrentRoom(null)
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
+  }
+
   if (view === 'home') {
     return (
       <div className="container home-view">
@@ -319,6 +433,16 @@ function App() {
             className="input"
             disabled={loading}
           />
+          <div className="checkbox-group">
+            <input
+              type="checkbox"
+              id="hideClubs"
+              checked={hideClubs}
+              onChange={(e) => setHideClubs(e.target.checked)}
+              disabled={loading}
+            />
+            <label htmlFor="hideClubs">Hide clubs selection from other players</label>
+          </div>
           <button onClick={createRoom} className="btn btn-primary" disabled={loading}>
             {loading ? 'Creating...' : 'Create Room'}
           </button>
@@ -350,12 +474,14 @@ function App() {
     return (
       <div className="container room-view">
         <div className="header">
+          <button onClick={goBack} className="btn-back">← Back</button>
           <h1>Room: {roomCode}</h1>
           <p>Select your club to continue</p>
         </div>
 
         <div className="player-section">
-          <h2>Your Name: {currentRoom?.players.find((p) => p.playerId === currentPlayerId)?.name}</h2>
+          <h2>{currentRoom?.players.find((p) => p.playerId === currentPlayerId)?.name}</h2>
+          {selectedClub && <div className="selected-club-badge">{selectedClub}</div>}
           <p>Pick a club:</p>
           <select
             value={selectedClub}
@@ -376,10 +502,21 @@ function App() {
           <h3>Players in Room ({currentRoom?.players.length}):</h3>
           {currentRoom?.players.map((p) => (
             <div key={p.playerId} className="player-item">
-              <span className="player-name">{p.name}</span>
-              <span className={`club-badge ${p.club ? 'selected' : 'empty'}`}>
-                {p.club || 'No club selected'}
-              </span>
+              <div className="player-info">
+                <span className="player-name">{p.name}</span>
+                {p.club && <span className="club-selected-mark">✓</span>}
+              </div>
+              {!currentRoom?.hideClubs && p.club && (
+                <span className="club-badge selected">{p.club}</span>
+              )}
+              {!currentRoom?.hideClubs && !p.club && (
+                <span className="club-badge empty">No club</span>
+              )}
+              {currentRoom?.hideClubs && (
+                <span className={`club-badge ${p.club ? 'selected' : 'empty'}`}>
+                  {p.club ? '✓ Selected' : 'Not selected'}
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -405,6 +542,7 @@ function App() {
     return (
       <div className="container game-view">
         <div className="header">
+          <button onClick={goBack} className="btn-back">← Back</button>
           <h1>🎮 Game in Progress</h1>
           <div className="room-info">
             <span>Room: {roomCode}</span>
